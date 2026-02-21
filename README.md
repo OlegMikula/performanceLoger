@@ -1,64 +1,102 @@
-# Performance Logger — моніторинг навантаження процесів
+# Performance Logger — process load monitoring
 
-Збирає статистику по CPU та пам'яті для вказаних процесів і зберігає її в CSV.
+Collects CPU and memory statistics for specified processes and writes them to CSV.
 
-## Встановлення
+## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Запуск
+---
 
-**Моніторинг до ручної зупинки (Ctrl+C):**
+## monitor.py — logging
+
+### Usage
+
+**Monitor until you stop (Ctrl+C):**
 ```bash
 python monitor.py -p "chrome.exe,Code.exe"
 ```
 
-**Моніторинг протягом 60 секунд:**
+**Monitor for 60 seconds:**
 ```bash
 python monitor.py -p "chrome.exe" -d 60
 ```
 
-**Інтервал збору 2 секунди, свій файл виводу:**
+**Sampling every 2 seconds, custom output file:**
 ```bash
 python monitor.py -p "notepad.exe" -i 2 -o my_log.csv
 ```
 
-### Параметри
-
-| Параметр | Опис |
-|----------|------|
-| `-p`, `--processes` | Імена процесів через кому (наприклад: `chrome.exe`, `Code.exe`) |
-| `-i`, `--interval` | Інтервал збору в секундах (за замовчуванням: 1) |
-| `-d`, `--duration` | Тривалість у секундах; якщо не вказано — до Ctrl+C |
-| `-o`, `--output` | Шлях до CSV-файлу (за замовчуванням: `performance_log_YYYYMMDD_HHMMSS.csv`) |
-
-## Формат CSV
-
-| Колонка | Опис |
-|---------|------|
-| timestamp | Час знімка |
-| pid | ID процесу (корисно, якщо процес завершився — видно до якого моменту були дані) |
-| process_name | Ім'я процесу |
-| memory_mb | Пам'ять у МБ |
-| cpu_percent | Навантаження CPU у відсотках |
-| status | `running` або `exited` (запис про завершення процесу) |
-
-## Графіки (plot_csv.py)
-
-Побудова графіків з CSV: один файл — один графік; два і більше — порівняльний графік (часу від початку по осі X).
-
-**Один CSV (звичайний графік):**
+**Wildcard process names** (e.g. all processes whose name starts with `GTB-`):
 ```bash
-python plot_csv.py log.csv -o chart.png
+python monitor.py -p "GTB-*" -d 120 -o gtb_log.csv
 ```
 
-**Декілька CSV (порівняння):**
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `-p`, `--processes` | Comma-separated process names (e.g. `chrome.exe`, `Code.exe`). Supports wildcards: `*` = any characters, `?` = one character (e.g. `GTB-*`). |
+| `-i`, `--interval` | Sampling interval in seconds (default: 1). |
+| `-d`, `--duration` | Run for this many seconds; if omitted, runs until Ctrl+C. |
+| `-o`, `--output` | Output CSV path (default: `performance_log_YYYYMMDD_HHMMSS.csv`). |
+
+### After run
+
+When monitoring ends (by duration or Ctrl+C), a **summary** is printed: for each process (by unique PID), min / max / avg for RAM (MB) and CPU (%).
+
+### CSV format
+
+| Column | Description |
+|--------|-------------|
+| timestamp | Sample time |
+| pid | Process ID (helps see when a process exited) |
+| process_name | Process name |
+| memory_mb | Memory in MB |
+| cpu_percent | CPU usage in percent |
+| status | `running` or `exited` |
+
+---
+
+## plot_csv.py — charts
+
+Builds charts from performance log CSVs. Single file → one chart; multiple files → comparison chart (X axis = time from start).
+
+### Usage
+
+**Single file (all processes or filtered by PIDs):**
+```bash
+python plot_csv.py log.csv -o chart.png
+python plot_csv.py log.csv --pid "23420, 21404" -o chart.png
+```
+
+**Comparison (multiple files):**
 ```bash
 python plot_csv.py run1.csv run2.csv run3.csv -o compare.png
 ```
 
-**Метрика:** `-m memory` (за замовчуванням), `-m cpu` або `-m both` (два графіки — пам'ять і CPU).
+**One PID per file** (run1 → 1111, run2 → 2222):
+```bash
+python plot_csv.py run1.csv run2.csv --pid "1111, 2222" -o compare.png
+```
 
-**Без `-o`** — графік відкриється у вікні (plt.show()).
+**Multiple PIDs per file** — use `;` to group by file (run1: 1111,1112; run2: 2221,2222):
+```bash
+python plot_csv.py run1.csv run2.csv --pid "1111,1112;2221,2222" -o compare.png
+```
+
+**Metric:** `-m memory` (default), `-m cpu`, or `-m both` (two subplots: memory and CPU).
+
+**Optional:** `-o path` saves the image; without `-o`, the chart opens in a window. `-t "Title"` sets the chart title.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `csv_files` | One or more CSV files (from monitor.py). |
+| `-m`, `--metric` | `memory` (default), `cpu`, or `both`. |
+| `-o`, `--output` | Output image path (e.g. `chart.png`). If omitted, display only. |
+| `-t`, `--title` | Chart title. |
+| `--pid` | PIDs to plot. **Single file:** comma-separated (e.g. `"1111, 1112"`). **Comparison:** use `;` to group by file (e.g. `"1111,1112;2221,2222"` = run1→1111,1112 and run2→2221,2222). Or one PID for all files, or N single PIDs (one per file). |

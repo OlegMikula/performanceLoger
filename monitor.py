@@ -8,6 +8,7 @@ import csv
 import signal
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -42,21 +43,48 @@ def sample_process(proc: psutil.Process) -> tuple[float, float] | None:
         return None
 
 
+def _print_summary(
+    ram_by_process: dict[tuple[str, int], list[float]],
+    cpu_by_process: dict[tuple[str, int], list[float]],
+) -> None:
+    """Print min, max, avg for RAM and CPU per (process_name, pid)."""
+    if not ram_by_process and not cpu_by_process:
+        return
+    print("\n--- Summary ---")
+    keys = sorted(set(ram_by_process) | set(cpu_by_process), key=lambda k: (k[0], k[1]))
+    for name, pid in keys:
+        rams = ram_by_process.get((name, pid), [])
+        cpus = cpu_by_process.get((name, pid), [])
+        parts = []
+        if rams:
+            parts.append(f"RAM min={min(rams):.2f} max={max(rams):.2f} avg={sum(rams)/len(rams):.2f} MB")
+        if cpus:
+            parts.append(f"CPU min={min(cpus):.2f} max={max(cpus):.2f} avg={sum(cpus)/len(cpus):.2f}%")
+        if parts:
+            print(f"  {name} (PID {pid}):  {'  |  '.join(parts)}")
+
+
 def run_monitor(
     process_names: list[str],
     *,
     interval: float = 1.0,
     duration_seconds: float | None = None,
     output_path: Path,
+    stop_requested: list[bool] | None = None,
 ) -> None:
     seen_pids: set[int] = set()
     start = time.perf_counter()
+    ram_by_process: dict[tuple[str, int], list[float]] = defaultdict(list)
+    cpu_by_process: dict[tuple[str, int], list[float]] = defaultdict(list)
+    stop = stop_requested if stop_requested is not None else [False]
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["timestamp", "pid", "process_name", "memory_mb", "cpu_percent", "status"])
 
         while True:
+            if stop[0]:
+                break
             if duration_seconds is not None and (time.perf_counter() - start) >= duration_seconds:
                 print("\nDuration reached. Stopping.")
                 break
@@ -96,6 +124,9 @@ def run_monitor(
                     continue
 
                 memory_mb, cpu_percent = result
+                key = (name, pid)
+                ram_by_process[key].append(memory_mb)
+                cpu_by_process[key].append(cpu_percent)
                 ts = datetime.now().isoformat(sep=" ", timespec="seconds")
                 writer.writerow([ts, pid, name, memory_mb, f"{cpu_percent:.2f}", "running"])
                 print(f"  {ts} | PID {pid} | {name} | RAM {memory_mb} MB | CPU {cpu_percent:.1f}%")
@@ -103,6 +134,8 @@ def run_monitor(
             f.flush()
 
             time.sleep(max(0.05, interval - 0.2))
+
+    _print_summary(ram_by_process, cpu_by_process)
 
 
 def main() -> None:
@@ -156,9 +189,11 @@ def main() -> None:
         print("Stop with Ctrl+C")
     print()
 
+    stop_requested: list[bool] = [False]
+
     def on_sigint(*_):  # noqa: ANN002
         print("\nStopping monitor.")
-        sys.exit(0)
+        stop_requested[0] = True
 
     signal.signal(signal.SIGINT, on_sigint)
     if hasattr(signal, "SIGBREAK"):
@@ -169,6 +204,7 @@ def main() -> None:
         interval=args.interval,
         duration_seconds=args.duration,
         output_path=output_path,
+        stop_requested=stop_requested,
     )
 
 
